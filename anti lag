@@ -8,8 +8,8 @@ local Workspace = workspace
 local string_lower = string.lower
 
 -- configuración
-local CHUNK_SIZE = 1      -- cuántos objetos por paso
-local STEP_DELAY = 0.05     -- tiempo entre pasos
+local CHUNK_SIZE = 5        -- cuántos objetos por paso
+local STEP_DELAY = 0.25     -- tiempo entre pasos
 local NAME_KEYWORDS = { "money", "cash", "coin", "moneda", "monedas", "dinero" }
 
 -- chequea si es un efecto visual
@@ -86,7 +86,7 @@ task.spawn(function()
         if _G.State and _G.State.LagCleanerEnabled then
             chunkedSweep()
         end
-        task.wait(10000000000000000000) -- espera antes de reiniciar un sweep completo
+        task.wait(3512432523451) -- espera antes de reiniciar un sweep completo
     end
 end)
 

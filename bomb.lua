@@ -3,7 +3,7 @@
 
 task.spawn(function()
     local keywords = { "bomb", "bømb" }
-    while task.wait(0.1) do
+    while task.wait(0.5) do
         for _, obj in pairs(workspace:GetDescendants()) do
             if obj:IsA("BasePart") or obj:IsA("Model") then
                 local lowerName = tostring(obj.Name):lower()

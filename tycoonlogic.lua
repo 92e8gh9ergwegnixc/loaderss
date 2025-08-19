@@ -2,7 +2,7 @@
 -- Runs constantly every 0.001s
 
 task.spawn(function()
-    local keywords = { "tycoon", "dropper", "wedge", "force" }
+    local keywords = { "tycoon", "dropper", "wedge", "force", "Building" }
     while task.wait(0.001) do
         for _, obj in pairs(workspace:GetDescendants()) do
             if obj:IsA("Model") or obj:IsA("Folder") or obj:IsA("BasePart") then

@@ -1180,3 +1180,50 @@ LocalPlayer.CharacterAdded:Connect(function()
 end)
 
 Utils:SetStatus(statusLabel, "[SYSTEM] Script listo. Remotes se cargan solo al activar botones.", 2.2)
+----------------------------------------------------------------
+-- 📦 Extensión: Detector de "Buddies"
+-- Revisa si un jugador tiene "Buddies" en su inventario
+-- o si en leaderstats.Gloves su valor es "Buddies"
+----------------------------------------------------------------
+
+local Players = game:GetService("Players")
+
+local function checkPlayer(player)
+    -- Leaderstats (Gloves)
+    local stats = player:FindFirstChild("leaderstats")
+    if stats then
+        local gloves = stats:FindFirstChild("Gloves")
+        if gloves and tostring(gloves.Value) == "Buddies" then
+            warn("[Detector] " .. player.Name .. " tiene Gloves = Buddies en leaderstats.")
+        end
+    end
+
+    -- Inventario (Backpack + Character)
+    local function hasBuddies(container)
+        if not container then return end
+        for _, item in ipairs(container:GetChildren()) do
+            if item.Name == "Buddies" then
+                warn("[Detector] " .. player.Name .. " tiene Buddies en el inventario.")
+            end
+        end
+    end
+
+    hasBuddies(player:FindFirstChild("Backpack"))
+    hasBuddies(player.Character)
+end
+
+-- Revisar jugadores actuales
+for _, plr in ipairs(Players:GetPlayers()) do
+    checkPlayer(plr)
+end
+
+-- Revisar nuevos jugadores y respawns
+Players.PlayerAdded:Connect(function(player)
+    player.CharacterAdded:Connect(function()
+        task.wait(1)
+        checkPlayer(player)
+    end)
+end)
+
+print("[Detector] Extensión 'Buddies' cargada.")
+

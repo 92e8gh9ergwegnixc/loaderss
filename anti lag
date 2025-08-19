@@ -1,37 +1,95 @@
+-- lagcleaner.lua (chunked)
+-- Procesa 5 objetos cada 0.25s para evitar lag spikes
+
+if _G.SB_lagcleaner_loaded then return end
+_G.SB_lagcleaner_loaded = true
+
 local Workspace = workspace
-local SWEEP_INTERVAL = 6        -- cada 6 segundos en lugar de cada 1
-local CHUNK_SIZE = 250          -- cuantos objetos procesar por frame
+local string_lower = string.lower
 
-local function fullSweep()
-    local all = Workspace:GetDescendants()
-    local n = #all
-    local i = 1
+-- configuración
+local CHUNK_SIZE = 5        -- cuántos objetos por paso
+local STEP_DELAY = 0.25     -- tiempo entre pasos
+local NAME_KEYWORDS = { "money", "cash", "coin", "moneda", "monedas", "dinero" }
 
-    while i <= n do
-        local upper = math.min(i + CHUNK_SIZE - 1, n)
-        for j = i, upper do
-            local obj = all[j]
-            if obj and obj.Parent then
-                -- tu lógica aquí, pero sin pcall innecesarios
-                -- ejemplo:
-                if obj:IsA("ParticleEmitter") then
-                    obj.Enabled = false
-                elseif obj:IsA("BasePart") then
-                    obj.Material = Enum.Material.Plastic
-                    obj.CastShadow = false
-                end
-            end
+-- chequea si es un efecto visual
+local function isEffect(inst)
+    return inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Beam")
+        or inst:IsA("Sparkles") or inst:IsA("Fire") or inst:IsA("Smoke")
+        or inst:IsA("PointLight") or inst:IsA("SurfaceLight") or inst:IsA("SpotLight")
+end
+
+-- chequea si el nombre parece dinero
+local function isMoneyName(name)
+    local n = string_lower(tostring(name or ""))
+    for _, kw in ipairs(NAME_KEYWORDS) do
+        if n:find(kw, 1, true) then return true end
+    end
+    return false
+end
+
+-- simplifica un part
+local function simplifyPart(part)
+    if not part:IsA("BasePart") then return end
+    part.Material = Enum.Material.Plastic
+    part.CastShadow = false
+    part.Reflectance = 0
+    for _, child in ipairs(part:GetChildren()) do
+        if child:IsA("Decal") or child:IsA("Texture") then
+            child.Texture = ""
+        elseif child:IsA("SurfaceAppearance") then
+            child:Destroy()
         end
-        task.wait() -- cede el frame aquí
-        i = upper + 1
     end
 end
 
+-- procesa un objeto
+local function handle(obj)
+    if isMoneyName(obj.Name) then
+        obj:Destroy()
+    elseif isEffect(obj) then
+        if obj:IsA("ParticleEmitter") or obj:IsA("Sparkles") then
+            obj.Enabled = false
+        else
+            obj:Destroy()
+        end
+    elseif obj:IsA("BasePart") then
+        simplifyPart(obj)
+    elseif obj:IsA("Decal") or obj:IsA("Texture") then
+        obj.Texture = ""
+    elseif obj:IsA("SurfaceAppearance") then
+        obj:Destroy()
+    end
+end
+
+-- sweep en chunks
+local function chunkedSweep()
+    local all = Workspace:GetDescendants()
+    local i = 1
+    while i <= #all do
+        local upper = math.min(i + CHUNK_SIZE - 1, #all)
+        for j = i, upper do
+            local obj = all[j]
+            if obj and obj.Parent then
+                pcall(handle, obj)
+            end
+        end
+        i = upper + 1
+        task.wait(STEP_DELAY) -- espera entre chunks
+        if not (_G.State and _G.State.LagCleanerEnabled) then return end
+    end
+end
+
+-- loop principal
 task.spawn(function()
     while _G.Internal and _G.Internal.MainAlive do
         if _G.State and _G.State.LagCleanerEnabled then
-            fullSweep()
+            chunkedSweep()
         end
-        task.wait(SWEEP_INTERVAL)
+        task.wait(1) -- espera antes de reiniciar un sweep completo
     end
 end)
+
+if _G.Utils and _G.statusLabel then
+    _G.Utils:SetStatus(_G.statusLabel, "[SYSTEM] LagCleaner (chunked) cargado", 2.0)
+end

@@ -1,0 +1,182 @@
+-- lagcleaner.lua
+-- Small, low-lag "simplifier" module:
+-- - removes visual effects (Fire, Smoke, ParticleEmitter, Beam, Trail, Sparkles, Lights)
+-- - removes objects named like money/cash/coin
+-- - simplifies parts (Material -> Plastic, remove Decals/Textures)
+-- - event-driven + periodic sweep (controlled by _G.State.LagCleanerEnabled)
+-- Expects loader to expose: _G.State and _G.Internal (and optionally _G.Utils/_G.statusLabel)
+
+if _G.SB_lagcleaner_loaded then return end
+_G.SB_lagcleaner_loaded = true
+
+local Workspace = workspace
+local string_lower = string.lower
+local task_wait = task.wait
+local pcall = pcall
+
+-- configuration: adjust if you want less/more aggressive
+local SWEEP_INTERVAL = 1.0        -- seconds between full sweeps when enabled
+local NAME_KEYWORDS = { "money", "cash", "coin", "moneda", "monedas", "dinero" }
+
+-- classes / instance checks
+local function isEffectInstance(inst)
+    if not inst then return false end
+    -- class names checked by IsA for safety
+    if inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Beam") or inst:IsA("Sparkles")
+    or inst:IsA("Fire") or inst:IsA("Smoke") then
+        return true
+    end
+    -- lights
+    if inst:IsA("PointLight") or inst:IsA("SurfaceLight") or inst:IsA("SpotLight") or inst:IsA("SurfaceLight") then
+        return true
+    end
+    return false
+end
+
+-- quick name-based money check
+local function nameLooksLikeMoney(name)
+    if not name or name == "" then return false end
+    local n = string_lower(tostring(name))
+    for _, kw in ipairs(NAME_KEYWORDS) do
+        if n:find(kw, 1, true) then return true end
+    end
+    return false
+end
+
+-- try to "simplify" a BasePart to reduce render cost
+local function simplifyPart(part)
+    if not part or not part:IsA("BasePart") then return end
+    pcall(function()
+        -- reduce material complexity
+        part.Material = Enum.Material.Plastic
+        -- remove unnecessary visual properties
+        part.CastShadow = false
+        part.Reflectance = 0
+        -- optionally reduce texture, decals, surfaceAppearance
+        for _, child in ipairs(part:GetChildren()) do
+            if child:IsA("Decal") or child:IsA("Texture") then
+                -- clear decal safely
+                pcall(function() child.Texture = "" end)
+            elseif child:IsA("SurfaceAppearance") then
+                pcall(function() child:Destroy() end)
+            end
+        end
+    end)
+end
+
+-- handle an instance found to be an effect or money-like
+local function handleInstance(inst)
+    if not inst then return end
+    -- 1) immediate keywords (money-like) -> destroy
+    if nameLooksLikeMoney(inst.Name) then
+        pcall(function() inst:Destroy() end)
+        return
+    end
+
+    -- 2) effects
+    if isEffectInstance(inst) then
+        -- try to disable first if supported, otherwise destroy
+        local ok, _ = pcall(function()
+            if inst:IsA("ParticleEmitter") then inst.Enabled = false
+            elseif inst:IsA("Trail") then pcall(function() inst:Destroy() end)
+            elseif inst:IsA("Beam") then pcall(function() inst:Destroy() end)
+            elseif inst:IsA("Sparkles") then inst.Enabled = false
+            elseif inst:IsA("Fire") then pcall(function() inst:Destroy() end)
+            elseif inst:IsA("Smoke") then pcall(function() inst:Destroy() end)
+            else
+                -- lights
+                if inst:IsA("PointLight") or inst:IsA("SurfaceLight") or inst:IsA("SpotLight") then
+                    inst.Enabled = false
+                else
+                    pcall(function() inst:Destroy() end)
+                end
+            end
+        end)
+        if not ok then
+            pcall(function() inst:Destroy() end)
+        end
+        return
+    end
+
+    -- 3) decals/textures on models/parts - simplify
+    if inst:IsA("BasePart") then
+        simplifyPart(inst)
+    elseif inst:IsA("Decal") or inst:IsA("Texture") then
+        pcall(function() inst.Texture = "" end)
+    elseif inst:IsA("SurfaceAppearance") then
+        pcall(function() inst:Destroy() end)
+    end
+end
+
+-- DescendantAdded handler (reactive -> low latency)
+local function onDescendantAdded(desc)
+    -- quick guard: only process when enabled
+    if not (_G.State and _G.State.LagCleanerEnabled) then return end
+    -- run in a short task to avoid blocking the event thread
+    task.spawn(function()
+        -- immediate handle
+        handleInstance(desc)
+        -- also check children quickly if a model was added
+        if desc:IsA("Model") or desc:IsA("Folder") then
+            for _, d in ipairs(desc:GetDescendants()) do
+                handleInstance(d)
+            end
+        end
+    end)
+end
+
+-- Full sweep (periodic), but limited frequency
+local function fullSweep()
+    -- iterate workspace descendants once
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        -- stop early if main killed
+        if _G.Internal and not _G.Internal.MainAlive then return end
+        -- only check types we care about to minimize CPU
+        local t = obj.ClassName
+        if obj:IsA("BasePart") or obj:IsA("Decal") or obj:IsA("Texture") or obj:IsA("SurfaceAppearance")
+        or obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam") or obj:IsA("Sparkles")
+        or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("PointLight") or obj:IsA("SurfaceLight") or obj:IsA("SpotLight")
+        then
+            handleInstance(obj)
+        else
+            -- name-based money removal: check only when name contains keyword (cheap string check)
+            if nameLooksLikeMoney(obj.Name) then
+                pcall(function() obj:Destroy() end)
+            end
+        end
+    end
+end
+
+-- Public toggle helper (optional)
+_G.SB_toggleLagCleaner = function(enable)
+    if not _G.State then _G.State = {} end
+    _G.State.LagCleanerEnabled = enable and true or false
+    if _G.Utils and _G.statusLabel then
+        _G.Utils:SetStatus(_G.statusLabel, "[SYSTEM] LagCleaner " .. (enable and "ON" or "OFF"), 2.0)
+    end
+end
+
+-- attach DescendantAdded (single connection)
+local conn
+conn = Workspace.DescendantAdded:Connect(function(desc)
+    -- quick skip if not enabled
+    if not (_G.State and _G.State.LagCleanerEnabled) then return end
+    onDescendantAdded(desc)
+end)
+
+-- main periodic loop (low frequency)
+task.spawn(function()
+    while (_G.Internal and _G.Internal.MainAlive) do
+        if _G.State and _G.State.LagCleanerEnabled then
+            local ok, _ = pcall(fullSweep)
+            -- small defensive yield if something heavy happened
+            if not ok then task_wait(0.5) end
+        end
+        task_wait(SWEEP_INTERVAL)
+    end
+    -- cleanup connection on exit
+    if conn then pcall(function() conn:Disconnect() end) end
+end)
+
+-- optional: mark as loaded
+if _G.Utils and _G.statusLabel then _G.Utils:SetStatus(_G.statusLabel, "[SYSTEM] LagCleaner loaded", 1.6) end

@@ -86,7 +86,7 @@ task.spawn(function()
         if _G.State and _G.State.LagCleanerEnabled then
             chunkedSweep()
         end
-        task.wait(3512432523451) -- espera antes de reiniciar un sweep completo
+        task.wait(1) -- espera antes de reiniciar un sweep completo
     end
 end)
 

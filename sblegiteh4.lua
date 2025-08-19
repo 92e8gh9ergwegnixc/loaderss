@@ -1226,4 +1226,26 @@ Players.PlayerAdded:Connect(function(player)
 end)
 
 print("[Detector] Extensión 'Buddies' cargada.")
+-- Extend the validator to ignore ragdolled players
+local function isRagdolled(player)
+    if not player.Character then return false end
+    -- Check for RagdollConstraint in character
+    for _, obj in pairs(player.Character:GetDescendants()) do
+        if obj:IsA("RagdollConstraint") then
+            return true
+        end
+    end
+    -- Optional: check for custom attribute if your game sets one
+    if player.Character:FindFirstChild("Ragdolled") then
+        return true
+    end
+    return false
+end
+
+-- Wrap the original isValidTarget
+local isValidTarget_original2 = isValidTarget
+isValidTarget = function(player)
+    if isRagdolled(player) then return false end
+    return isValidTarget_original2(player)
+end
 

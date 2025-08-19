@@ -1,18 +1,11 @@
--- lagcleaner_instant.lua
--- - limpia efectos visuales (Fire, Smoke, ParticleEmitter, Beam, Trail, Sparkles, Lights)
--- - elimina objetos con nombres de dinero/monedas
--- - simplifica materiales y decals/texturas
--- - todo de una sola vez (sin loop permanente)
--- - NO usa RemoteEvents, solo se controla con _G.SB_toggleLagCleaner
-
-if _G.SB_lagcleaner_loaded then return end
-_G.SB_lagcleaner_loaded = true
+-- lagcleaner_instant_force.lua
+-- Ejecuta TODO de una sola vez, sin toggle, sin loop
 
 local Workspace = workspace
 local string_lower = string.lower
 local pcall = pcall
 
--- configuración
+-- palabras clave para eliminar objetos con nombres de dinero
 local NAME_KEYWORDS = { "money", "cash", "coin", "moneda", "monedas", "dinero" }
 
 -- checks
@@ -37,6 +30,7 @@ local function nameLooksLikeMoney(name)
     return false
 end
 
+-- simplificar partes
 local function simplifyPart(part)
     if not part or not part:IsA("BasePart") then return end
     pcall(function()
@@ -45,22 +39,25 @@ local function simplifyPart(part)
         part.Reflectance = 0
         for _, child in ipairs(part:GetChildren()) do
             if child:IsA("Decal") or child:IsA("Texture") then
-                pcall(function() child.Texture = "" end)
+                child.Texture = ""
             elseif child:IsA("SurfaceAppearance") then
-                pcall(function() child:Destroy() end)
+                child:Destroy()
             end
         end
     end)
 end
 
+-- procesar cada objeto
 local function handleInstance(inst)
     if not inst then return end
 
+    -- eliminar si el nombre parece dinero
     if nameLooksLikeMoney(inst.Name) then
         pcall(function() inst:Destroy() end)
         return
     end
 
+    -- eliminar/inhabilitar efectos visuales
     if isEffectInstance(inst) then
         pcall(function()
             if inst:IsA("ParticleEmitter") then inst.Enabled = false
@@ -74,6 +71,7 @@ local function handleInstance(inst)
         return
     end
 
+    -- simplificar materiales/texturas
     if inst:IsA("BasePart") then
         simplifyPart(inst)
     elseif inst:IsA("Decal") or inst:IsA("Texture") then
@@ -83,27 +81,9 @@ local function handleInstance(inst)
     end
 end
 
--- función que limpia TODO en una sola pasada
-local function runCleaner()
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        handleInstance(obj)
-    end
+-- 🚀 Ejecutar TODO en una sola pasada
+for _, obj in ipairs(Workspace:GetDescendants()) do
+    handleInstance(obj)
 end
 
--- API pública para activar/desactivar
-_G.SB_toggleLagCleaner = function(enable)
-    if enable then
-        runCleaner()
-        if _G.Utils and _G.statusLabel then
-            _G.Utils:SetStatus(_G.statusLabel, "[SYSTEM] LagCleaner ejecutado", 2.0)
-        end
-    else
-        if _G.Utils and _G.statusLabel then
-            _G.Utils:SetStatus(_G.statusLabel, "[SYSTEM] LagCleaner inactivo", 2.0)
-        end
-    end
-end
-
-if _G.Utils and _G.statusLabel then
-    _G.Utils:SetStatus(_G.statusLabel, "[SYSTEM] LagCleaner loaded (instant mode)", 1.6)
-end
+print("[LagCleaner] Mapa simplificado instantáneamente.")

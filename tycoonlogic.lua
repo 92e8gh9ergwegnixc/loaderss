@@ -1,24 +1,31 @@
--- ANTI-TYCOON LOGIC (paste this in place of the current isValidTarget wrapper)
--- Add `AntiTycoonEnabled = false,` to your `State = { ... }` table if not present.
+-- ANTI-TYCOON (extended with Dropper/Wedge/Force keywords)
+-- Make sure you added: AntiTycoonEnabled = false, to your State table
 
-local function isPlayerInTycoon(player, radius)
+local function isPlayerInRestrictedZone(player, radius)
     if not player or not player.Character then return false end
     local hrp = player.Character:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
     radius = radius or 8
 
-    -- look for Models whose name contains "tycoon" (case-insensitive)
-    for _, m in pairs(Workspace:GetDescendants()) do
-        if m:IsA("Model") and tostring(m.Name):lower():find("tycoon") then
-            -- if the player's HRP is parented under the tycoon model, count it
-            if hrp:IsDescendantOf(m) then
-                return true
-            end
-            -- otherwise check proximity to any BasePart inside that model
-            for _, part in pairs(m:GetDescendants()) do
-                if part:IsA("BasePart") then
-                    if (hrp.Position - part.Position).Magnitude <= radius then
+    -- Keywords to check against
+    local blockedKeywords = { "tycoon", "dropper", "wedge", "force" }
+
+    for _, obj in pairs(Workspace:GetDescendants()) do
+        if obj:IsA("Model") or obj:IsA("Folder") then
+            local lowerName = tostring(obj.Name):lower()
+            for _, kw in ipairs(blockedKeywords) do
+                if lowerName:find(kw) then
+                    -- if HRP is inside this object, ignore
+                    if hrp:IsDescendantOf(obj) then
                         return true
+                    end
+                    -- otherwise check proximity to any parts inside
+                    for _, part in pairs(obj:GetDescendants()) do
+                        if part:IsA("BasePart") then
+                            if (hrp.Position - part.Position).Magnitude <= radius then
+                                return true
+                            end
+                        end
                     end
                 end
             end
@@ -28,16 +35,15 @@ local function isPlayerInTycoon(player, radius)
     return false
 end
 
--- Replace your existing wrapper with this one so anti-tycoon can block targets
+-- Wrap your target validator
 local oldIsValidTarget = isValidTarget
 isValidTarget = function(player)
     if Internal.RagdollIgnoredGround[player] or Internal.RagdollIgnoredAir[player] then
         return false
     end
 
-    -- if you enable this flag in State, players inside/near tycoons will be ignored
     if State.AntiTycoonEnabled then
-        if isPlayerInTycoon(player, 8) then
+        if isPlayerInRestrictedZone(player, 8) then
             return false
         end
     end

@@ -1,95 +1,121 @@
--- lagcleaner.lua (chunked)
--- Procesa 5 objetos cada 0.25s para evitar lag spikes
+-- lagcleaner.lua (fixed)
+-- - limpia efectos visuales (Fire, Smoke, ParticleEmitter, Beam, Trail, Sparkles, Lights)
+-- - elimina objetos con nombres de dinero/monedas
+-- - simplifica materiales y decals/texturas
+-- - funciona poco a poco (batch 5 partes cada 0.25s) para evitar lag spikes
+-- - NO usa RemoteEvents, solo se controla con _G.SB_toggleLagCleaner
 
 if _G.SB_lagcleaner_loaded then return end
 _G.SB_lagcleaner_loaded = true
 
 local Workspace = workspace
 local string_lower = string.lower
+local task_wait = task.wait
+local pcall = pcall
 
 -- configuración
-local CHUNK_SIZE = 5        -- cuántos objetos por paso
-local STEP_DELAY = 0.25     -- tiempo entre pasos
+local SWEEP_BATCH = 5       -- cuántas partes procesa por ciclo
+local SWEEP_DELAY = 0.25    -- delay entre ciclos
 local NAME_KEYWORDS = { "money", "cash", "coin", "moneda", "monedas", "dinero" }
 
--- chequea si es un efecto visual
-local function isEffect(inst)
-    return inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Beam")
-        or inst:IsA("Sparkles") or inst:IsA("Fire") or inst:IsA("Smoke")
-        or inst:IsA("PointLight") or inst:IsA("SurfaceLight") or inst:IsA("SpotLight")
+-- checks
+local function isEffectInstance(inst)
+    if not inst then return false end
+    if inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Beam")
+    or inst:IsA("Sparkles") or inst:IsA("Fire") or inst:IsA("Smoke") then
+        return true
+    end
+    if inst:IsA("PointLight") or inst:IsA("SurfaceLight") or inst:IsA("SpotLight") then
+        return true
+    end
+    return false
 end
 
--- chequea si el nombre parece dinero
-local function isMoneyName(name)
-    local n = string_lower(tostring(name or ""))
+local function nameLooksLikeMoney(name)
+    if not name or name == "" then return false end
+    local n = string_lower(tostring(name))
     for _, kw in ipairs(NAME_KEYWORDS) do
         if n:find(kw, 1, true) then return true end
     end
     return false
 end
 
--- simplifica un part
 local function simplifyPart(part)
-    if not part:IsA("BasePart") then return end
-    part.Material = Enum.Material.Plastic
-    part.CastShadow = false
-    part.Reflectance = 0
-    for _, child in ipairs(part:GetChildren()) do
-        if child:IsA("Decal") or child:IsA("Texture") then
-            child.Texture = ""
-        elseif child:IsA("SurfaceAppearance") then
-            child:Destroy()
-        end
-    end
-end
-
--- procesa un objeto
-local function handle(obj)
-    if isMoneyName(obj.Name) then
-        obj:Destroy()
-    elseif isEffect(obj) then
-        if obj:IsA("ParticleEmitter") or obj:IsA("Sparkles") then
-            obj.Enabled = false
-        else
-            obj:Destroy()
-        end
-    elseif obj:IsA("BasePart") then
-        simplifyPart(obj)
-    elseif obj:IsA("Decal") or obj:IsA("Texture") then
-        obj.Texture = ""
-    elseif obj:IsA("SurfaceAppearance") then
-        obj:Destroy()
-    end
-end
-
--- sweep en chunks
-local function chunkedSweep()
-    local all = Workspace:GetDescendants()
-    local i = 1
-    while i <= #all do
-        local upper = math.min(i + CHUNK_SIZE - 1, #all)
-        for j = i, upper do
-            local obj = all[j]
-            if obj and obj.Parent then
-                pcall(handle, obj)
+    if not part or not part:IsA("BasePart") then return end
+    pcall(function()
+        part.Material = Enum.Material.Plastic
+        part.CastShadow = false
+        part.Reflectance = 0
+        for _, child in ipairs(part:GetChildren()) do
+            if child:IsA("Decal") or child:IsA("Texture") then
+                pcall(function() child.Texture = "" end)
+            elseif child:IsA("SurfaceAppearance") then
+                pcall(function() child:Destroy() end)
             end
         end
-        i = upper + 1
-        task.wait(STEP_DELAY) -- espera entre chunks
-        if not (_G.State and _G.State.LagCleanerEnabled) then return end
+    end)
+end
+
+local function handleInstance(inst)
+    if not inst then return end
+
+    if nameLooksLikeMoney(inst.Name) then
+        pcall(function() inst:Destroy() end)
+        return
+    end
+
+    if isEffectInstance(inst) then
+        pcall(function()
+            if inst:IsA("ParticleEmitter") then inst.Enabled = false
+            elseif inst:IsA("Trail") or inst:IsA("Beam") or inst:IsA("Fire") or inst:IsA("Smoke") then
+                inst:Destroy()
+            elseif inst:IsA("Sparkles") then inst.Enabled = false
+            elseif inst:IsA("PointLight") or inst:IsA("SurfaceLight") or inst:IsA("SpotLight") then
+                inst.Enabled = false
+            end
+        end)
+        return
+    end
+
+    if inst:IsA("BasePart") then
+        simplifyPart(inst)
+    elseif inst:IsA("Decal") or inst:IsA("Texture") then
+        pcall(function() inst.Texture = "" end)
+    elseif inst:IsA("SurfaceAppearance") then
+        pcall(function() inst:Destroy() end)
     end
 end
 
--- loop principal
+-- API pública para activar/desactivar
+_G.SB_toggleLagCleaner = function(enable)
+    if not _G.State then _G.State = {} end
+    _G.State.LagCleanerEnabled = enable and true or false
+    if _G.Utils and _G.statusLabel then
+        _G.Utils:SetStatus(_G.statusLabel, "[SYSTEM] LagCleaner " .. (enable and "ON" or "OFF"), 2.0)
+    end
+end
+
+-- escanea poco a poco en batches
 task.spawn(function()
-    while _G.Internal and _G.Internal.MainAlive do
+    while (_G.Internal and _G.Internal.MainAlive) do
         if _G.State and _G.State.LagCleanerEnabled then
-            chunkedSweep()
+            local all = Workspace:GetDescendants()
+            local count = 0
+            for _, obj in ipairs(all) do
+                if not (_G.State and _G.State.LagCleanerEnabled) then break end
+                handleInstance(obj)
+                count += 1
+                if count >= SWEEP_BATCH then
+                    count = 0
+                    task_wait(SWEEP_DELAY)
+                end
+            end
+        else
+            task_wait(1)
         end
-        task.wait(1) -- espera antes de reiniciar un sweep completo
     end
 end)
 
 if _G.Utils and _G.statusLabel then
-    _G.Utils:SetStatus(_G.statusLabel, "[SYSTEM] LagCleaner (chunked) cargado", 2.0)
+    _G.Utils:SetStatus(_G.statusLabel, "[SYSTEM] LagCleaner loaded", 1.6)
 end

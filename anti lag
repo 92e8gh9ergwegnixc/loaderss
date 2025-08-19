@@ -1,8 +1,8 @@
--- lagcleaner.lua (fixed)
+-- lagcleaner_instant.lua
 -- - limpia efectos visuales (Fire, Smoke, ParticleEmitter, Beam, Trail, Sparkles, Lights)
 -- - elimina objetos con nombres de dinero/monedas
 -- - simplifica materiales y decals/texturas
--- - funciona poco a poco (batch 5 partes cada 0.25s) para evitar lag spikes
+-- - todo de una sola vez (sin loop permanente)
 -- - NO usa RemoteEvents, solo se controla con _G.SB_toggleLagCleaner
 
 if _G.SB_lagcleaner_loaded then return end
@@ -10,12 +10,9 @@ _G.SB_lagcleaner_loaded = true
 
 local Workspace = workspace
 local string_lower = string.lower
-local task_wait = task.wait
 local pcall = pcall
 
 -- configuración
-local SWEEP_BATCH = 5       -- cuántas partes procesa por ciclo
-local SWEEP_DELAY = 0.25    -- delay entre ciclos
 local NAME_KEYWORDS = { "money", "cash", "coin", "moneda", "monedas", "dinero" }
 
 -- checks
@@ -86,36 +83,27 @@ local function handleInstance(inst)
     end
 end
 
--- API pública para activar/desactivar
-_G.SB_toggleLagCleaner = function(enable)
-    if not _G.State then _G.State = {} end
-    _G.State.LagCleanerEnabled = enable and true or false
-    if _G.Utils and _G.statusLabel then
-        _G.Utils:SetStatus(_G.statusLabel, "[SYSTEM] LagCleaner " .. (enable and "ON" or "OFF"), 2.0)
+-- función que limpia TODO en una sola pasada
+local function runCleaner()
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        handleInstance(obj)
     end
 end
 
--- escanea poco a poco en batches
-task.spawn(function()
-    while (_G.Internal and _G.Internal.MainAlive) do
-        if _G.State and _G.State.LagCleanerEnabled then
-            local all = Workspace:GetDescendants()
-            local count = 0
-            for _, obj in ipairs(all) do
-                if not (_G.State and _G.State.LagCleanerEnabled) then break end
-                handleInstance(obj)
-                count += 1
-                if count >= SWEEP_BATCH then
-                    count = 0
-                    task_wait(SWEEP_DELAY)
-                end
-            end
-        else
-            task_wait(1)
+-- API pública para activar/desactivar
+_G.SB_toggleLagCleaner = function(enable)
+    if enable then
+        runCleaner()
+        if _G.Utils and _G.statusLabel then
+            _G.Utils:SetStatus(_G.statusLabel, "[SYSTEM] LagCleaner ejecutado", 2.0)
+        end
+    else
+        if _G.Utils and _G.statusLabel then
+            _G.Utils:SetStatus(_G.statusLabel, "[SYSTEM] LagCleaner inactivo", 2.0)
         end
     end
-end)
+end
 
 if _G.Utils and _G.statusLabel then
-    _G.Utils:SetStatus(_G.statusLabel, "[SYSTEM] LagCleaner loaded", 1.6)
+    _G.Utils:SetStatus(_G.statusLabel, "[SYSTEM] LagCleaner loaded (instant mode)", 1.6)
 end

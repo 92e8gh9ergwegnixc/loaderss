@@ -1,27 +1,22 @@
--- Roblox Multi-Game Loader (UniverseId only)
+-- Roblox Multi-Place Loader (PlaceId version)
 
-local universeLoaders = {
-    [3845366720]   = "https://raw.githubusercontent.com/92e8gh9ergwegnixc/loaderss/refs/heads/main/rideabike.lua", -- Ride a Bike
-    [2689745385]   = "https://raw.githubusercontent.com/92e8gh9ergwegnixc/loaderss/refs/heads/main/EZ.lua",
-    [1210921061]   = "https://raw.githubusercontent.com/92e8gh9ergwegnixc/loaderss/refs/heads/main/sblegiteh4.lua",
-    [10749683936]  = "https://raw.githubusercontent.com/92e8gh9ergwegnixc/loaderss/refs/heads/main/1year.lua",
-    [9250082598]   = "https://raw.githubusercontent.com/92e8gh9ergwegnixc/loaderss/refs/heads/main/inf.lua",
-    [5401793871]   = "https://raw.githubusercontent.com/92e8gh9ergwegnixc/loaderss/refs/heads/main/difffling.lua",
-    [34823097432]  = "https://raw.githubusercontent.com/92e8gh9ergwegnixc/loaderss/refs/heads/main/the%201m%20rope.lua",
-    [12804948086]   = "https://raw.githubusercontent.com/92e8gh9ergwegnixc/loaderss/refs/heads/main/the%20craziest%20game%20ever.lua",
-    [98645328401]  = "https://raw.githubusercontent.com/92e8gh9ergwegnixc/loaderss/refs/heads/main/spot%20the%20differences.lua"
+local placeLoaders = {
+    [14184086618] = "https://raw.githubusercontent.com/92e8gh9ergwegnixc/loaderss/refs/heads/main/rideabike.lua", -- Ride a Bike
+    [7979341445]  = "https://raw.githubusercontent.com/92e8gh9ergwegnixc/loaderss/refs/heads/main/EZ.lua",
+    [6403373529]  = "https://raw.githubusercontent.com/92e8gh9ergwegnixc/loaderss/refs/heads/main/sblegiteh4.lua",
+    [18406461316] = "https://raw.githubusercontent.com/92e8gh9ergwegnixc/loaderss/refs/heads/main/1year.lua",
+    [12062249395] = "https://raw.githubusercontent.com/92e8gh9ergwegnixc/loaderss/refs/heads/main/inf.lua",
+    [7809570930]  = "https://raw.githubusercontent.com/92e8gh9ergwegnixc/loaderss/refs/heads/main/difffling.lua",
+    [123741668193208] = "https://raw.githubusercontent.com/92e8gh9ergwegnixc/loaderss/refs/heads/main/the%201m%20rope.lua",
+    [12804948086] = "https://raw.githubusercontent.com/92e8gh9ergwegnixc/loaderss/refs/heads/main/the%20craziest%20game%20ever.lua",
+    [84890467483013] = "https://raw.githubusercontent.com/92e8gh9ergwegnixc/loaderss/refs/heads/main/spot%20the%20differences.lua"
 }
 
-local universeId = game.GameId
-local url = universeLoaders[universeId]
+local pid = game.PlaceId
+local url = placeLoaders[pid]
 
 if url then
-    local success, err = pcall(function()
-        loadstring(game:HttpGet(url))()
-    end)
-    if not success then
-        warn("⚠️ Error al cargar script para UniverseId " .. tostring(universeId) .. ": " .. tostring(err))
-    end
+    loadstring(game:HttpGet(url))()
 else
-    warn("❌ No hay loader asignado para UniverseId: " .. tostring(universeId))
+    warn("❌ No loader mapped for PlaceId: " .. tostring(pid))
 end

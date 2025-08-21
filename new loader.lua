@@ -8,7 +8,7 @@ local universeLoaders = {
     [9250082598]   = "https://raw.githubusercontent.com/92e8gh9ergwegnixc/loaderss/refs/heads/main/inf.lua",
     [5401793871]   = "https://raw.githubusercontent.com/92e8gh9ergwegnixc/loaderss/refs/heads/main/difffling.lua",
     [34823097432]  = "https://raw.githubusercontent.com/92e8gh9ergwegnixc/loaderss/refs/heads/main/the%201m%20rope.lua",
-    [6734982165]   = "https://raw.githubusercontent.com/92e8gh9ergwegnixc/loaderss/refs/heads/main/the%20craziest%20game%20ever.lua",
+    [12804948086]   = "https://raw.githubusercontent.com/92e8gh9ergwegnixc/loaderss/refs/heads/main/the%20craziest%20game%20ever.lua",
     [98645328401]  = "https://raw.githubusercontent.com/92e8gh9ergwegnixc/loaderss/refs/heads/main/spot%20the%20differences.lua"
 }
 

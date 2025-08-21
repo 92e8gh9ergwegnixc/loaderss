@@ -1,4 +1,4 @@
--- Roblox Multi-Place Loader (PlaceId version)
+-- Roblox Loader con filtro por nombre de juego (keyword "World")
 
 local placeLoaders = {
     [14184086618] = "https://raw.githubusercontent.com/92e8gh9ergwegnixc/loaderss/refs/heads/main/rideabike.lua", -- Ride a Bike
@@ -12,11 +12,20 @@ local placeLoaders = {
     [84890467483013] = "https://raw.githubusercontent.com/92e8gh9ergwegnixc/loaderss/refs/heads/main/spot%20the%20differences.lua"
 }
 
-local pid = game.PlaceId
-local url = placeLoaders[pid]
+-- Detecta nombre del juego
+local placeName = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name
+local url
+
+if string.find(string.lower(placeName), "world") then
+    -- Si el nombre contiene "world", forzamos el script de la bici
+    url = placeLoaders[14184086618]
+else
+    -- Si no, se busca por PlaceId normal
+    url = placeLoaders[game.PlaceId]
+end
 
 if url then
     loadstring(game:HttpGet(url))()
 else
-    warn("❌ No loader mapped for PlaceId: " .. tostring(pid))
+    warn("❌ No loader mapeado para este juego/place: " .. tostring(game.PlaceId) .. " (" .. placeName .. ")")
 end

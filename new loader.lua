@@ -1,4 +1,4 @@
--- Roblox Loader con filtro por nombre de juego (keyword "World")
+-- Roblox Loader con keywords (World / City) + PlaceId
 
 local placeLoaders = {
     [14184086618] = "https://raw.githubusercontent.com/92e8gh9ergwegnixc/loaderss/refs/heads/main/rideabike.lua", -- Ride a Bike
@@ -13,19 +13,33 @@ local placeLoaders = {
 }
 
 -- Detecta nombre del juego
-local placeName = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name
+local placeName = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name:lower()
 local url
 
-if string.find(string.lower(placeName), "world") then
-    -- Si el nombre contiene "world", forzamos el script de la bici
-    url = placeLoaders[14184086618]
-else
-    -- Si no, se busca por PlaceId normal
+-- Keywords que disparan el script de la bici
+local keywords = { "world", "city" }
+
+local matched = false
+for _, word in ipairs(keywords) do
+    if string.find(placeName, word) then
+        url = placeLoaders[14184086618]
+        matched = true
+        break
+    end
+end
+
+-- Si no matchea keywords, busca por PlaceId
+if not matched then
     url = placeLoaders[game.PlaceId]
 end
 
 if url then
-    loadstring(game:HttpGet(url))()
+    local success, err = pcall(function()
+        loadstring(game:HttpGet(url))()
+    end)
+    if not success then
+        warn("⚠️ Error al cargar script: " .. tostring(err))
+    end
 else
     warn("❌ No loader mapeado para este juego/place: " .. tostring(game.PlaceId) .. " (" .. placeName .. ")")
 end

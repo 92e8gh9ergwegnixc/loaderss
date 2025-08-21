@@ -17,7 +17,7 @@ local placeName = game:GetService("MarketplaceService"):GetProductInfo(game.Plac
 local url
 
 -- Keywords que disparan el script de la bici
-local keywords = { "world", "City" }
+local keywords = { "world", "Cyber", "Dropper" }
 
 local matched = false
 for _, word in ipairs(keywords) do

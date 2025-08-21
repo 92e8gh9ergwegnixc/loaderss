@@ -13,7 +13,7 @@ local player = Players.LocalPlayer
 local CHECKPOINT_PATH = {"WorldMap", "Checkpoints", "99", "Hitbox"}
 local PORTAL_PATH = {"WorldMap", "RestartPortal", "Meshes/IceysAssetPack_Cube (1)"}
 local WAIT_AFTER_CHECKPOINT = 0.1
-local COOLDOWN = 60 -- seconds per cycle (updated to 60s)
+local COOLDOWN = 66 -- seconds per cycle (updated to 60s)
 local INSTANT_DEBOUNCE = 5 -- seconds between Instant TP presses
 
 -- === HELPERS ===

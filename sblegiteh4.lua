@@ -1,12 +1,5 @@
 -- Slap Battles — Script Final Integrado (remotes load/unload on demand + one-shot FPS button)
--- Paste into your executor. Nothing is preloaded or active by default.
--- Remote modules will be fetched & executed only when you toggle their button ON.
--- When toggled OFF, the script will attempt to call a remote-provided cleanup function:
---    _G.SB_cleanup_<name>()
--- Remote authors: to support unloading, expose a function named `_G.SB_cleanup_<name>` that cleans connections, tasks, and objects created by the module.
-
--- WARNING: Some remote scripts may not support unloading. In that case we do a best-effort cleanup
--- (call cleanup if provided, clear our markers). You should prefer remote modules that provide a cleanup.
+-- Versión corregida: TP al portal, seguir jugadores y slap a <=7 studs si no están ragdolled.
 
 local Players          = game:GetService("Players")
 local LocalPlayer      = Players.LocalPlayer
@@ -21,9 +14,9 @@ local HttpService      = game:GetService("HttpService")
 local Config = {
     WalkSpeedToPortal      = 20,
     WalkSpeedToPlayer      = 22,
-    AutoClickRange         = 8,
+    AutoClickRange         = 7,   -- slap si <= 7 studs
     MaxDistanceThreshold   = 140,
-    PortalTeleportRadius   = 140,
+    PortalTeleportRadius   = 120, -- portal si <= 120 studs
     TeleportCooldown       = 1.2,
     GuiWidthScale          = 0.30,
     GuiHeightScale         = 0.42,
@@ -32,7 +25,7 @@ local Config = {
     HeartbeatInterval      = 0.9,
 }
 
--- STATE / INTERNAL (all defaults OFF / false)
+-- STATE
 local State = {
     AutoFarmEnabled    = false,
     AntiBusEnabled     = false,
@@ -41,12 +34,11 @@ local State = {
     DropperCleaner     = false,
     AntiIce            = false,
     AntiRock           = false,
-    RagdollESPEnabled  = false, -- toggles Player ESP
+    RagdollESPEnabled  = false,
     AntiTycoonEnabled  = false,
     AntiSakuraEnabled  = false,
     AntiBombEnabled    = false,
     AntiSpectator      = false,
-    -- LagCleaner intentionally NOT a toggle here (one-shot button) - we won't preset it
 }
 
 local Internal = {
@@ -54,105 +46,212 @@ local Internal = {
     StatusToken       = 0,
     CanTeleportAgain  = true,
     MainAlive         = true,
-    Billboards        = {},            -- player -> billboard
-    RagdollIgnoredGround = {},         -- player -> true (ragdolled on floor)
-    RagdollIgnoredAir    = {},         -- player -> true (ragdolled in air after ESP created)
-    PendingAirTask       = {},         -- player -> true while 1s delayed task pending
-    LoadedRemotes = {},                -- name -> { ok=true, url=..., info=... }
+    Billboards        = {},
+    RagdollIgnoredGround = {},
+    RagdollIgnoredAir    = {},
+    PendingAirTask       = {},
+    LoadedRemotes        = {},
 }
 
 -- UTILS
 local Utils = {}
 function Utils:SafeDestroy(obj) if not obj then return end pcall(function() if obj.Destroy then obj:Destroy() end end) end
-function Utils:Trim(s) if type(s) ~= "string" then return s end return s:match("^%s*(.-)%s*$") or s end
-
-function Utils:SetStatus(statusLabel, txt, duration)
-    if not statusLabel then return end
+function Utils:SetStatus(lbl, txt, dur)
+    if not lbl then return end
     txt = tostring(txt or "")
     if not Internal.MainAlive then return end
     if Internal.LastStatusMessage == txt then return end
-
-    Internal.StatusToken = Internal.StatusToken + 1
+    Internal.StatusToken += 1
     local myToken = Internal.StatusToken
-
     Internal.LastStatusMessage = txt
-    statusLabel.Text = txt
-
-    duration = tonumber(duration) or Config.StatusDefaultDuration
-    if duration < Config.StatusMinDuration then duration = Config.StatusMinDuration end
-
+    lbl.Text = txt
+    dur = tonumber(dur) or Config.StatusDefaultDuration
+    if dur < Config.StatusMinDuration then dur = Config.StatusMinDuration end
     task.spawn(function()
-        task.wait(duration)
+        task.wait(dur)
         if Internal.StatusToken == myToken and Internal.MainAlive then
-            statusLabel.Text = "Status: Idle"
+            lbl.Text = "Status: Idle"
             Internal.LastStatusMessage = "Status: Idle"
         end
     end)
 end
 
--- DANGER PARTS
-local dangerParts = {}
-pcall(function()
-    if Workspace:FindFirstChild("Arena") then
-        local arena = Workspace.Arena
-        if arena:FindFirstChild("island5") then
-            table.insert(dangerParts, arena.island5:FindFirstChild("Union"))
-        end
-        if arena:FindFirstChild("Chainwork") then
-            table.insert(dangerParts, arena.Chainwork:FindFirstChild("MeshPart"))
-        end
+----------------------------------------------------------------
+-- FUNCIONES IMPORTANTES
+----------------------------------------------------------------
+
+-- ✅ Teleport al portal real
+local function teleportToPortal(statusLabel)
+    local portal = Workspace:FindFirstChild("Lobby") and Workspace.Lobby:FindFirstChild("Teleport1")
+    local char = LocalPlayer.Character
+    if not portal or not char then
+        Utils:SetStatus(statusLabel, "[DEBUG] Teleport fallido (portal/char inválido).", 2.5)
+        return false
     end
-end)
-local function isNearDangerPart(position, radius) radius = radius or 10 for _, part in pairs(dangerParts) do if part and part:IsA("BasePart") then if (position - part.Position).Magnitude <= radius then return true end end end return false end
-
--- MOVEMENT / TELEPORT / UTIL
-local function resetCharacter() if LocalPlayer.Character then pcall(function() LocalPlayer.Character:BreakJoints() end) end end
-local function moveTo(pos, speed) local char = LocalPlayer.Character if not char then return end local humanoid = char:FindFirstChildOfClass("Humanoid") if humanoid then humanoid.WalkSpeed = speed or humanoid.WalkSpeed humanoid:MoveTo(pos) end end
-local function teleportToPortal(statusLabel) local portal = Workspace:FindFirstChild("Lobby") and Workspace.Lobby:FindFirstChild("Teleport1") local char = LocalPlayer.Character if not portal or not char or not char.PrimaryPart then Utils:SetStatus(statusLabel, "[DEBUG] Teleport failed (portal/char invalid).", 2.5) return false end pcall(function() char:PivotTo(portal.CFrame) end) Internal.CanTeleportAgain = false task.delay(Config.TeleportCooldown, function() Internal.CanTeleportAgain = true end) Utils:SetStatus(statusLabel, "[DEBUG] Teleported to portal.", 2.5) return true end
-
--- BASE VALIDATOR (wraps later)
-local function isValidTarget_original(player)
-    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    local targetHRP = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-    local arena = Workspace:FindFirstChild("Arena")
-    local grass = arena and arena:FindFirstChild("main island") and arena["main island"]:FindFirstChild("Grass")
-    local plate = arena and arena:FindFirstChild("Plate")
-    if not hrp or not targetHRP or not grass or not plate then return false end
-    local dy = targetHRP.Position.Y - grass.Position.Y
-    if dy < -1 or dy > 20 then return false end
-    if isNearDangerPart(targetHRP.Position) then return false end
-    local distToPlate = (targetHRP.Position - plate.Position).Magnitude
-    if distToPlate <= 10 then return false end
+    if not char.PrimaryPart then
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp then char.PrimaryPart = hrp end
+    end
+    if not char.PrimaryPart then
+        Utils:SetStatus(statusLabel, "[DEBUG] Teleport fallido (no PrimaryPart).", 2.5)
+        return false
+    end
+    pcall(function()
+        char:PivotTo(portal.CFrame + Vector3.new(0, 4, 0))
+    end)
+    Internal.CanTeleportAgain = false
+    task.delay(Config.TeleportCooldown, function() Internal.CanTeleportAgain = true end)
+    Utils:SetStatus(statusLabel, "[DEBUG] Teleport al portal hecho.", 2.0)
     return true
 end
-local isValidTarget = isValidTarget_original
 
+-- Verificar ragdoll
+local function isRagdolled(player)
+    if not player.Character then return false end
+    local hum = player.Character:FindFirstChildOfClass("Humanoid")
+    if not hum then return false end
+    if hum.PlatformStand or hum:GetState() == Enum.HumanoidStateType.Physics then
+        return true
+    end
+    return false
+end
+
+-- Buscar jugador más cercano válido
 local function findNearestValidPlayer()
     local myHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not myHRP then return nil, nil end
+    if not myHRP then return nil, math.huge end
     local nearest, bestDist = nil, math.huge
-    for _, p in pairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") and isValidTarget(p) then
-            local dist = (p.Character.HumanoidRootPart.Position - myHRP.Position).Magnitude
-            if dist < bestDist then bestDist, nearest = dist, p end
+    for _, pl in ipairs(Players:GetPlayers()) do
+        if pl ~= LocalPlayer and pl.Character and pl.Character:FindFirstChild("HumanoidRootPart") then
+            if not isRagdolled(pl) then
+                local dist = (pl.Character.HumanoidRootPart.Position - myHRP.Position).Magnitude
+                if dist < bestDist then
+                    bestDist, nearest = dist, pl
+                end
+            end
         end
     end
     return nearest, bestDist
 end
 
-local function countPlayersInRadius(radius)
-    local myHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not myHRP then return 0 end
-    local count = 0
-    for _, p in pairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
-            local dist = (p.Character.HumanoidRootPart.Position - myHRP.Position).Magnitude
-            if dist <= radius then count = count + 1 end
-        end
-    end
-    return count
-end
+----------------------------------------------------------------
+-- LOOPS PRINCIPALES (AutoFarm + AutoClick)
+----------------------------------------------------------------
 
+task.spawn(function()
+    while Internal.MainAlive do
+        if State.AutoFarmEnabled then
+            local char = LocalPlayer.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            if hrp and hum and hum.Health > 0 then
+                -- 1. Teleport al portal si estamos cerca
+                local portal = Workspace:FindFirstChild("Lobby") and Workspace.Lobby:FindFirstChild("Teleport1")
+                if portal then
+                    local distToPortal = (hrp.Position - portal.Position).Magnitude
+                    if distToPortal <= Config.PortalTeleportRadius and Internal.CanTeleportAgain then
+                        teleportToPortal(nil)
+                    end
+                end
+
+                -- 2. Buscar jugador más cercano
+                local target, dist = findNearestValidPlayer()
+                if target and dist < Config.MaxDistanceThreshold then
+                    hum:MoveTo(target.Character.HumanoidRootPart.Position)
+                    -- 3. Slap si está cerca
+                    if dist <= Config.AutoClickRange then
+                        local tool = char:FindFirstChildOfClass("Tool")
+                        if tool then
+                            pcall(function() tool:Activate() end)
+                        end
+                    end
+                end
+            end
+        end
+        task.wait(0.12)
+    end
+end)
+
+----------------------------------------------------------------
+-- Detector de inactividad (reset rápido si no se mueve >2s, solo si AutoFarm=ON)
+----------------------------------------------------------------
+task.spawn(function()
+    local lastPos = nil
+    local lastMoveTime = tick()
+
+    while Internal.MainAlive do
+        if State.AutoFarmEnabled then
+            local char = LocalPlayer.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                if lastPos then
+                    local dist = (hrp.Position - lastPos).Magnitude
+                    if dist > 1 then
+                        lastMoveTime = tick() -- se movió
+                    else
+                        if tick() - lastMoveTime >= 2 then
+                            local hum = char:FindFirstChildOfClass("Humanoid")
+                            if hum then
+                                hum.Health = 0 -- ✅ reset rápido
+                                Utils:SetStatus(nil, "[SYSTEM] Reset rápido por inactividad >2s", 2.5)
+                            end
+                            lastMoveTime = tick()
+                        end
+                    end
+                end
+                lastPos = hrp.Position
+            end
+        else
+            -- si AutoFarm está OFF, no hace nada
+            lastPos = nil
+            lastMoveTime = tick()
+        end
+        task.wait(0.2)
+    end
+end)
+-- Auto-reset si tu personaje está ragdolled más de 5s (solo si AutoFarm=ON y GUI abierto)
+task.spawn(function()
+    local ragdollStart = nil
+
+    while Internal.MainAlive do
+        if State.AutoFarmEnabled then
+            local char = LocalPlayer.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+
+            if hum then
+                local isRag = hum.PlatformStand or hum:GetState() == Enum.HumanoidStateType.Physics
+
+                if isRag then
+                    if not ragdollStart then
+                        ragdollStart = tick() -- empieza a contar
+                    elseif tick() - ragdollStart >= 5 then
+                        -- más de 5 segundos ragdolled → reset rápido (doble método)
+                        hum.Health = 0
+                        pcall(function() char:BreakJoints() end)
+                        Utils:SetStatus(nil, "[SYSTEM] Reset rápido: ragdolled >5s", 2.5)
+                        ragdollStart = nil
+                    end
+                else
+                    ragdollStart = nil -- se levantó, resetea contador
+                end
+            else
+                ragdollStart = nil
+            end
+        else
+            ragdollStart = nil -- si AutoFarm está OFF, no hace nada
+        end
+
+        task.wait(0.2)
+    end
+end)
+----------------------------------------------------------------
+-- 🔥 Aquí continúa TODO el resto del script de tu versión original:
+-- GUI (main y extra), botones, toggles, remotes, ESP, autojump,
+-- antirock, antiice, antibomb, antisakura, etc.
+--
+-- No hace falta cambiarlos: lo importante (TP + seguir + slap)
+-- ya está corregido arriba.
+----------------------------------------------------------------
 -- UI helpers
 local function makeRounded(instance, radius) local u = Instance.new("UICorner") u.CornerRadius = radius or UDim.new(0,10) u.Parent = instance return u end
 local Theme = { Background = Color3.fromRGB(28,28,30), Muted = Color3.fromRGB(38,38,42), Positive = Color3.fromRGB(50,170,80), Negative = Color3.fromRGB(200,60,60), Text = Color3.fromRGB(230,230,230), Accent = Color3.fromRGB(40,120,255) }
@@ -199,7 +298,7 @@ title.Font = Enum.Font.SourceSansBold
 local closeBtn = Instance.new("TextButton", topBar)
 closeBtn.Size = UDim2.new(0, 28, 0, 20)
 closeBtn.Position = UDim2.new(1, -34, 0, 4)
-closeBtn.Text = "x"
+closeBtn.Text = "X"
 closeBtn.Font = Enum.Font.SourceSansBold
 closeBtn.TextScaled = true
 closeBtn.BackgroundColor3 = Theme.Negative
@@ -283,6 +382,8 @@ local openExtraButton = makeMainButton("Abrir Extra Pack", 2, Theme.Muted)
 openExtraButton.Name = "OpenExtra"
 local resetButton = makeMainButton("Reset Character", 3)
 local tpPortalButton = makeMainButton("Teleport to Portal", 4)
+local speedButton = makeMainButton("Set WalkSpeed", 5)
+
 
 mainLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
     mainScroll.CanvasSize = UDim2.new(0, 0, 0, mainLayout.AbsoluteContentSize.Y + 8)
@@ -306,10 +407,19 @@ openExtraButton.MouseButton1Click:Connect(function()
 end)
 
 resetButton.MouseButton1Click:Connect(function()
-    resetCharacter()
-    Utils:SetStatus(statusLabel, "[SYSTEM] Character reset called", 1.8)
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        hum.Health = 0 -- ✅ reset rápido
+        Utils:SetStatus(statusLabel, "[SYSTEM] Reset rápido ejecutado", 2.0)
+    else
+        -- fallback si no hay humanoide
+        if char then
+            pcall(function() char:BreakJoints() end)
+            Utils:SetStatus(statusLabel, "[WARN] Reset con BreakJoints (fallback)", 2.0)
+        end
+    end
 end)
-
 tpPortalButton.MouseButton1Click:Connect(function()
     teleportToPortal(statusLabel)
 end)
@@ -1055,6 +1165,137 @@ task.spawn(function()
         task.wait(0.12)
     end
 end)
+-- Ventana flotante de WalkSpeed
+local walkSpeedGui = nil
+local walkSpeedFrame = nil
+Internal.CustomWalkSpeed = nil  -- guarda la velocidad elegida
+
+local function createWalkSpeedGui()
+    if walkSpeedGui and walkSpeedGui.Parent then return end
+
+    local g = Instance.new("ScreenGui")
+    g.Name = "SB_WalkSpeedGui"
+    g.Parent = CoreGui
+    g.ResetOnSpawn = false
+    g.DisplayOrder = 500
+
+    local frame = Instance.new("Frame", g)
+    frame.Size = UDim2.new(0, 220, 0, 100)
+    frame.Position = UDim2.new(0.4, 0, 0.4, 0)
+    frame.BackgroundColor3 = Theme.Background
+    frame.BorderSizePixel = 0
+    makeRounded(frame, UDim.new(0, 10))
+
+    -- Barra superior para drag
+    local topBar = Instance.new("Frame", frame)
+    topBar.Size = UDim2.new(1, 0, 0, 28)
+    topBar.BackgroundTransparency = 1
+
+    local title = Instance.new("TextLabel", topBar)
+    title.Size = UDim2.new(1, -36, 1, 0)
+    title.Position = UDim2.new(0, 10, 0, 0)
+    title.BackgroundTransparency = 1
+    title.Text = "Editar WalkSpeed"
+    title.TextColor3 = Theme.Text
+    title.TextScaled = true
+    title.Font = Enum.Font.SourceSansBold
+    title.TextXAlignment = Enum.TextXAlignment.Left
+
+    local closeBtn = Instance.new("TextButton", topBar)
+    closeBtn.Size = UDim2.new(0, 23, 0, 18)
+    closeBtn.Position = UDim2.new(1, -24, 0, 4)
+    closeBtn.Text = "X"
+    closeBtn.Font = Enum.Font.SourceSansBold
+    closeBtn.TextScaled = true
+    closeBtn.BackgroundColor3 = Theme.Negative
+    closeBtn.BorderSizePixel = 0
+    makeRounded(closeBtn, UDim.new(0,6))
+
+-- Caja de texto
+local inputBox = Instance.new("TextBox", frame)
+inputBox.Size = UDim2.new(1, -20, 0, 34)
+inputBox.Position = UDim2.new(0, 10, 0, 40)
+inputBox.BackgroundColor3 = Theme.Muted
+inputBox.TextColor3 = Theme.Text
+inputBox.TextScaled = true
+inputBox.PlaceholderText = "Escribe la velocidad"
+inputBox.Font = Enum.Font.SourceSansBold
+inputBox.ClearTextOnFocus = false
+inputBox.Text = "" -- 🔑 siempre vacío al inicio
+makeRounded(inputBox, UDim.new(0, 8))
+
+-- Cuando entras a escribir, limpia el contenido anterior
+inputBox.Focused:Connect(function()
+    inputBox.Text = ""
+end)
+
+    -- Aplicar valor al presionar Enter
+    inputBox.FocusLost:Connect(function(enterPressed)
+        if enterPressed then
+            local newSpeed = tonumber(inputBox.Text)
+            if newSpeed and newSpeed > 0 then
+                Internal.CustomWalkSpeed = newSpeed
+                Utils:SetStatus(statusLabel, "[SYSTEM] Velocidad fija en " .. newSpeed, 2.5)
+            else
+                Utils:SetStatus(statusLabel, "[ERROR] Valor inválido", 2.0)
+            end
+        end
+    end)
+
+    -- Drag
+    local dragging = false
+    local dragStart, startPos
+    topBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local delta = input.Position - dragStart
+            frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X,
+                                       startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+
+    -- Cerrar
+    closeBtn.MouseButton1Click:Connect(function()
+        g:Destroy()
+        walkSpeedGui, walkSpeedFrame = nil, nil
+    end)
+
+    walkSpeedGui, walkSpeedFrame = g, frame
+end
+
+-- Toggle del panel
+speedButton.MouseButton1Click:Connect(function()
+    if walkSpeedGui and walkSpeedGui.Parent then
+        walkSpeedGui:Destroy()
+        walkSpeedGui, walkSpeedFrame = nil, nil
+    else
+        createWalkSpeedGui()
+    end
+end)
+
+-- Loop que aplica la velocidad cada 0.1s
+task.spawn(function()
+    while Internal.MainAlive do
+        if Internal.CustomWalkSpeed and LocalPlayer.Character then
+            local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if hum and hum.Health > 0 then
+                hum.WalkSpeed = Internal.CustomWalkSpeed
+            end
+        end
+        task.wait(0.1)
+    end
+end)
 
 -- AutoClick
 task.spawn(function()
@@ -1248,4 +1489,3 @@ isValidTarget = function(player)
     if isRagdolled(player) then return false end
     return isValidTarget_original2(player)
 end
-

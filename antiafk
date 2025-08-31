@@ -1,0 +1,15 @@
+-- Anti-AFK Script (Clicks every minute, background)
+local VirtualUser = game:GetService("VirtualUser")
+local Players = game:GetService("Players")
+
+-- Function to simulate a click
+local function click()
+    VirtualUser:CaptureController()
+    VirtualUser:ClickButton2(Vector2.new(0, 0))
+end
+
+-- Run the click function every 60 seconds
+while true do
+    click()
+    wait(60) -- waits 60 seconds before clicking again
+end
